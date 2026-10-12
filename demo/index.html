@@ -1,0 +1,462 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>three.js HDR Lighting</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@112..125,500..800&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: one reading column (~68ch) with the live viewport and chart breaking wider; light-meter vernacular (EV, clip %, histogram) as the visual language. */
+:root {
+  --bg: #f3f1ec;          /* photographic paper */
+  --surface: #e9e6df;
+  --ink: #1b1f24;
+  --ink-2: #4a5059;
+  --ink-3: #737a84;
+  --rule: #d3cfc6;
+  --accent: #b86d0c;      /* sodium lamp */
+  --accent-ink: #8f5309;
+  --clip: #c62f3a;        /* clipped-pixel warning */
+  --good: #2c7a4b;
+  --s-none: #2a78d6;      /* chart: no tone mapping */
+  --s-aces: #b86d0c;      /* chart: ACES */
+  --stage: #10161c;
+  --stage-ink: #e7e3da;
+  --code-bg: #e4e0d8;
+  --f-display: "Archivo", "Helvetica Neue", Arial, sans-serif;
+  --f-body: "IBM Plex Sans", system-ui, -apple-system, sans-serif;
+  --f-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #12171d; --surface: #1a2028; --ink: #e9e5dc; --ink-2: #b4b0a8; --ink-3: #868b93;
+    --rule: #2b333d; --accent: #e0a142; --accent-ink: #e8b260; --clip: #ef5b63; --good: #4fb87a;
+    --s-none: #3987e5; --s-aces: #c98500; --stage: #0b0f13; --stage-ink: #e7e3da; --code-bg: #1d242d;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #12171d; --surface: #1a2028; --ink: #e9e5dc; --ink-2: #b4b0a8; --ink-3: #868b93;
+  --rule: #2b333d; --accent: #e0a142; --accent-ink: #e8b260; --clip: #ef5b63; --good: #4fb87a;
+  --s-none: #3987e5; --s-aces: #c98500; --stage: #0b0f13; --stage-ink: #e7e3da; --code-bg: #1d242d;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body { background: var(--bg); color: var(--ink); font: 400 16px/1.62 var(--f-body); }
+.page { padding-inline: 20px; padding-block: 40px 96px; }
+.col { max-width: 68ch; margin-inline: auto; }
+.wide { max-width: 1120px; margin-inline: auto; }
+h1, h2, h3 { font-family: var(--f-display); text-wrap: balance; margin: 0; }
+h1 { font-size: clamp(2.1rem, 5.2vw, 3.6rem); font-weight: 800; font-stretch: 125%; line-height: 1.02; letter-spacing: -0.015em; }
+h2 { font-size: clamp(1.45rem, 2.6vw, 1.9rem); font-weight: 750; font-stretch: 118%; line-height: 1.15; }
+h3 { font-size: 1.02rem; font-weight: 700; font-stretch: 112%; }
+p { margin: 0; }
+a { color: var(--accent-ink); text-underline-offset: 3px; }
+a:focus-visible, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.eyebrow { font: 500 0.74rem/1 var(--f-mono); letter-spacing: 0.12em; text-transform: uppercase; color: var(--ink-3); }
+.lede { font-size: 1.14rem; color: var(--ink-2); max-width: 60ch; }
+code, kbd { font-family: var(--f-mono); font-size: 0.88em; }
+:not(pre) > code { background: var(--code-bg); padding: 0.1em 0.35em; border-radius: 4px; }
+pre { margin: 0; background: var(--code-bg); border-radius: 8px; padding: 14px 16px; overflow-x: auto; font: 400 0.84rem/1.55 var(--f-mono); }
+section { display: grid; gap: 18px; padding-block: 44px 8px; border-top: 1px solid var(--rule); margin-top: 44px; }
+.stack { display: grid; gap: 14px; }
+
+/* Hero */
+.hero { display: grid; gap: 18px; padding-block: 8px 28px; }
+.hero .meta { display: flex; flex-wrap: wrap; gap: 8px 18px; font: 400 0.82rem/1.4 var(--f-mono); color: var(--ink-3); }
+
+/* Live viewport */
+.viewport { background: var(--stage); color: var(--stage-ink); border-radius: 10px; overflow: hidden; display: grid; }
+.viewport canvas { width: 100%; aspect-ratio: 16 / 9; display: block; max-width: 100%; }
+.controls { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px 20px; padding: 12px 14px; border-top: 1px solid #ffffff14; }
+.seg { display: inline-flex; background: #ffffff10; border-radius: 999px; padding: 3px; }
+.seg button { font: 600 0.86rem/1 var(--f-body); color: #c9c4ba; background: none; border: 0; padding: 9px 14px; border-radius: 999px; cursor: pointer; }
+.seg button[aria-pressed="true"] { background: #e7e3da; color: #10161c; }
+.readouts { display: flex; flex-wrap: wrap; gap: 6px 20px; font: 400 0.8rem/1.3 var(--f-mono); font-variant-numeric: tabular-nums; }
+.readouts div { display: grid; gap: 2px; }
+.readouts span { color: #8e949c; font-size: 0.68rem; letter-spacing: 0.1em; text-transform: uppercase; }
+.readouts b { font-weight: 500; color: #ece8df; }
+.readouts b.bad { color: #ff7b82; }
+.readouts b.ok { color: #6fd39a; }
+.hist { padding: 0 14px 14px; display: grid; gap: 6px; }
+.hist svg { width: 100%; height: 54px; display: block; }
+.hist .lab { display: flex; justify-content: space-between; font: 400 0.68rem/1 var(--f-mono); color: #8e949c; letter-spacing: 0.08em; text-transform: uppercase; }
+.changes { padding: 0 14px 14px; font: 400 0.78rem/1.55 var(--f-mono); color: #b9b4aa; }
+.changes summary { cursor: pointer; color: #e7e3da; font-family: var(--f-body); font-size: 0.86rem; font-weight: 600; }
+.changes ul { margin: 8px 0 0; padding-left: 18px; }
+.caption { font-size: 0.88rem; color: var(--ink-3); max-width: 68ch; }
+
+/* Cause lists */
+.causes { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr)); gap: 28px 40px; }
+.causes > div { min-width: 0; display: grid; gap: 12px; align-content: start; }
+.causes ol { margin: 0; padding: 0; list-style: none; display: grid; gap: 14px; counter-reset: c; }
+.causes li { display: grid; gap: 3px; padding-left: 34px; position: relative; counter-increment: c; }
+.causes li::before { content: counter(c); position: absolute; left: 0; top: 1px; font: 500 0.74rem/1 var(--f-mono); color: var(--accent-ink); border: 1px solid var(--rule); border-radius: 50%; width: 22px; height: 22px; display: grid; place-items: center; }
+.causes li strong { font-weight: 600; }
+.causes li .fix { font-size: 0.9rem; color: var(--ink-2); }
+.causes li .fix code { font-size: 0.82em; }
+
+/* Pipeline */
+.pipe { overflow-x: auto; }
+.pipe ol { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(5, minmax(150px, 1fr)); gap: 0; min-width: 760px; }
+.pipe li { padding: 14px 16px 16px; border-top: 3px solid var(--rule); display: grid; gap: 6px; align-content: start; position: relative; }
+.pipe li.key { border-top-color: var(--accent); }
+.pipe li:not(:last-child)::after { content: "→"; position: absolute; right: -8px; top: 12px; color: var(--ink-3); font-family: var(--f-mono); }
+.pipe .step { font: 500 0.7rem/1 var(--f-mono); letter-spacing: 0.1em; text-transform: uppercase; color: var(--ink-3); }
+.pipe h3 { font-size: 0.98rem; }
+.pipe p { font-size: 0.86rem; color: var(--ink-2); }
+.pipe .val { font: 400 0.76rem/1.4 var(--f-mono); color: var(--accent-ink); }
+
+/* Chart */
+.chart { background: var(--surface); border-radius: 10px; padding: 18px 18px 12px; display: grid; gap: 10px; position: relative; }
+.chart-head { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px 20px; align-items: baseline; }
+.legend { display: flex; gap: 16px; flex-wrap: wrap; font-size: 0.86rem; color: var(--ink-2); }
+.legend span { display: inline-flex; align-items: center; gap: 7px; }
+.legend i { width: 18px; height: 2px; border-radius: 2px; display: inline-block; }
+.chart-scroll { overflow-x: auto; }
+.chart svg { width: 100%; min-width: 560px; height: auto; display: block; overflow: visible; }
+.tip { position: absolute; pointer-events: none; background: var(--bg); color: var(--ink); border: 1px solid var(--rule); border-radius: 6px; padding: 8px 10px; font: 400 0.78rem/1.45 var(--f-mono); font-variant-numeric: tabular-nums; box-shadow: 0 4px 16px #0000001f; white-space: nowrap; }
+
+/* Tables */
+.tbl { overflow-x: auto; }
+table { border-collapse: collapse; width: 100%; font-size: 0.9rem; min-width: 560px; }
+th, td { text-align: left; padding: 9px 12px 9px 0; border-bottom: 1px solid var(--rule); vertical-align: top; }
+th { font: 500 0.72rem/1.2 var(--f-mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-3); }
+td.n { font-family: var(--f-mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
+td code { white-space: nowrap; }
+
+/* Install */
+.steps { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr)); gap: 22px 32px; }
+.steps > div { min-width: 0; display: grid; gap: 10px; align-content: start; }
+.copyrow { display: grid; gap: 6px; }
+.copyrow button { justify-self: start; font: 600 0.8rem/1 var(--f-body); color: var(--ink); background: none; border: 1px solid var(--rule); border-radius: 6px; padding: 7px 11px; cursor: pointer; }
+.callout { border-left: 3px solid var(--accent); padding: 4px 0 4px 16px; color: var(--ink-2); }
+footer { margin-top: 56px; font-size: 0.86rem; color: var(--ink-3); }
+@media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto !important; } }
+</style>
+
+<script type="importmap">
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.186.1/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.186.1/examples/jsm/"
+} }
+</script>
+
+<div class="page">
+  <header class="hero wide">
+    <p class="eyebrow">Claude skill · threejs-hdr-lighting</p>
+    <h1>Your three.js lights<br>are clipping.</h1>
+    <p class="lede">Agent-built three.js scenes ship blown out and flickering, and almost nobody checks. This skill makes every agent set up ACES filmic tone mapping, a light budget and flicker-safe shadows by default, and it can retrofit an existing scene in four calls.</p>
+    <div class="meta"><span>three.js r155+ physical lights</span><span>tested on r186.1</span><span>plain three.js · react-three-fiber</span></div>
+  </header>
+
+  <div class="wide">
+    <figure class="viewport" style="margin:0">
+      <canvas id="view" aria-label="Live three.js scene comparing typical lighting with the skill applied"></canvas>
+      <div class="controls">
+        <div class="seg" role="group" aria-label="Lighting setup">
+          <button id="m-typical" aria-pressed="true">As agents ship it</button>
+          <button id="m-skill" aria-pressed="false">With the skill</button>
+        </div>
+        <div class="readouts" aria-live="polite">
+          <div><span>Tone map</span><b id="r-tm">None</b></div>
+          <div><span>Exposure</span><b id="r-exp">1.00</b></div>
+          <div><span>Clipped px</span><b id="r-clip">–</b></div>
+          <div><span>Mean luma</span><b id="r-mean">–</b></div>
+        </div>
+      </div>
+      <div class="hist">
+        <svg id="hist" viewBox="0 0 480 54" preserveAspectRatio="none" aria-label="Luminance histogram of the current frame"></svg>
+        <div class="lab"><span>Shadows</span><span>Midtones</span><span>Clipped</span></div>
+      </div>
+      <details class="changes" id="changes" hidden>
+        <summary>What tameLights() changed in this scene</summary>
+        <ul id="change-list"></ul>
+      </details>
+    </figure>
+    <p class="caption" style="margin-top:10px">Same scene, same code, both modes. The left mode uses what agents typically write: no tone mapping, ambient + hemisphere + two directional lights, decay-0 street lamps, chrome at roughness 0.02, bloom at threshold 0.6, a sun that follows the bike, and a lamp driven by <code>Math.random()</code>. The right mode runs the skill's helpers on that exact scene. Watch the shadow under the bike and the third lamp.</p>
+  </div>
+
+  <section class="col">
+    <p class="eyebrow">Diagnosis</p>
+    <h2>Why it blows out, and why it flickers</h2>
+    <div class="causes">
+      <div>
+        <h3>Overexposure</h3>
+        <ol>
+          <li><strong>No tone mapping.</strong><span class="fix"><code>WebGLRenderer</code> defaults to <code>NoToneMapping</code>. Anything above 1.0 hard-clips to flat white.</span></li>
+          <li><strong>Stacked lights.</strong><span class="fix">Ambient 0.6 + hemisphere 0.8 + sun 2.5 + "fill" 1.0. Each looked fine alone; together a white wall lands 3–4× past clip.</span></li>
+          <li><strong>Point lights with no falloff.</strong><span class="fix"><code>decay: 0</code> lights everything at full strength, at any distance.</span></li>
+          <li><strong>Composer without OutputPass.</strong><span class="fix">Render targets skip the renderer's tone mapping. Only <code>OutputPass</code> applies ACES, exposure and sRGB.</span></li>
+          <li><strong>Bloom below threshold 1.0.</strong><span class="fix">Bloom runs on linear HDR before tone mapping, so a sunlit wall is already ~1.0. Lower thresholds turn the frame into fog.</span></li>
+        </ol>
+      </div>
+      <div>
+        <h3>Flicker</h3>
+        <ol>
+          <li><strong>Shadow swimming.</strong><span class="fix">A sun that follows the player moves the shadow map by fractions of a texel every frame. Edges crawl. Fix: snap to texels.</span></li>
+          <li><strong>Shadow acne.</strong><span class="fix">Zero <code>bias</code> and <code>normalBias</code>: surfaces shadow themselves in moving stripes.</span></li>
+          <li><strong>Specular fireflies.</strong><span class="fix">Metal at roughness &lt; 0.15 makes sub-pixel highlights that sparkle, then bloom turns each into a star.</span></li>
+          <li><strong>Composer drops MSAA.</strong><span class="fix"><code>new EffectComposer(renderer)</code> has no multisampling, so <code>antialias: true</code> silently stops working.</span></li>
+          <li><strong>Random flicker effects.</strong><span class="fix"><code>Math.random()</code> per frame at 60–144 Hz is a strobe, not a candle.</span></li>
+          <li><strong>Z-fighting.</strong><span class="fix">Coplanar decals or a near plane of 0.001. Lift decals, keep near ≥ 0.1.</span></li>
+        </ol>
+      </div>
+    </div>
+  </section>
+
+  <section class="wide">
+    <div class="col stack" style="margin-inline:0;max-width:68ch">
+      <p class="eyebrow">The tone curve</p>
+      <h2>What ACES does to a white wall</h2>
+      <p>Lit values in a physical scene routinely exceed 1.0. Without tone mapping, every value past 1.0 becomes the same white. ACES filmic compresses that range into a shoulder, so a wall at 2× or 4× still shows its shading. Hover the chart to read values.</p>
+    </div>
+    <div class="chart" id="curve">
+      <div class="chart-head">
+        <h3>Scene radiance (linear) → display value (sRGB)</h3>
+        <div class="legend"><span><i style="background:var(--s-none)"></i>No tone mapping</span><span><i style="background:var(--s-aces)"></i>ACES filmic, exposure 0.9</span></div>
+      </div>
+      <div class="chart-scroll"><svg id="curve-svg" viewBox="0 0 720 300" role="img" aria-label="Line chart: without tone mapping the display value clips at radiance 1.0; ACES rises smoothly and approaches white by radiance 6."></svg></div>
+      <div class="tip" id="curve-tip" hidden></div>
+    </div>
+    <p class="caption">Curve computed from three.js's own <code>ACESFilmicToneMapping</code> fit (including its 1/0.6 pre-scale) for a grey input. Marked points are approximate radiance of the white walls in the demo above.</p>
+  </section>
+
+  <section class="wide">
+    <div class="col stack" style="margin-inline:0;max-width:68ch">
+      <p class="eyebrow">Pipeline</p>
+      <h2>Where each fix sits in the frame</h2>
+      <p><code>createComposer()</code> builds this chain. The order matters: bloom must see linear HDR values, and OutputPass must be last.</p>
+    </div>
+    <div class="pipe">
+      <ol>
+        <li><span class="step">1 · Scene</span><h3>Linear HDR lighting</h3><p>Physical lights, decay 2, budget ≈ 3.5. Values above 1.0 are normal here.</p><span class="val">tameLights()</span></li>
+        <li><span class="step">2 · Target</span><h3>Half-float, 4× MSAA</h3><p>Keeps HDR values and restores the antialiasing the composer drops.</p><span class="val">HalfFloatType · samples: 4</span></li>
+        <li><span class="step">3 · Bloom</span><h3>Only true highlights</h3><p>Runs before tone mapping, so the threshold is in scene units.</p><span class="val">threshold 1.0 · strength 0.35</span></li>
+        <li class="key"><span class="step">4 · OutputPass</span><h3>ACES × exposure → sRGB</h3><p>The one place the curve above is applied.</p><span class="val">toneMappingExposure 0.9</span></li>
+        <li><span class="step">5 · Check</span><h3>Measure the frame</h3><p>Read back the drawn pixels; adjust exposure once if needed.</p><span class="val">clipped &lt; 2 % · mean 0.30–0.55</span></li>
+      </ol>
+    </div>
+  </section>
+
+  <section class="col">
+    <p class="eyebrow">Light budget</p>
+    <h2>Starting intensities</h2>
+    <p>Meters, physical light units, ACES at exposure 0.9. The rule that prevents most blow-outs: <strong>ambient + hemisphere + directional ≲ 3.5</strong>, minus about 1.5 for each 1.0 of environment-map intensity. Need it brighter? Raise the key light, not the fill.</p>
+    <div class="tbl">
+      <table>
+        <thead><tr><th>Light</th><th>Default</th><th>Range</th><th>Note</th></tr></thead>
+        <tbody>
+          <tr><td>DirectionalLight (sun / key)</td><td class="n">2.5</td><td class="n">1.5–3.0</td><td>One key light. A white surface facing it ≈ 0.8–1.0 linear.</td></tr>
+          <tr><td>HemisphereLight (fill)</td><td class="n">0.5</td><td class="n">0.3–0.8</td><td>Use instead of AmbientLight; keeps form.</td></tr>
+          <tr><td>AmbientLight</td><td class="n">0</td><td class="n">0–0.2</td><td>Flattens and washes out. Avoid.</td></tr>
+          <tr><td><code>scene.environmentIntensity</code></td><td class="n">0.35</td><td class="n">0.2–1.0</td><td>RoomEnvironment at 1.0 is a full studio by itself.</td></tr>
+          <tr><td>PointLight / SpotLight</td><td class="n">4 × d²</td><td class="n">—</td><td><code>d</code> = metres to the surfaces it lights. Street lamp at 5 m ≈ 100. Decay 2, always.</td></tr>
+          <tr><td><code>emissiveIntensity</code></td><td class="n">1.5</td><td class="n">1–3</td><td>Above 1.0 is what bloom picks up. Above 3 becomes a blob.</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="col">
+    <p class="eyebrow">Contents</p>
+    <h2>What's in the skill</h2>
+    <div class="tbl">
+      <table>
+        <thead><tr><th>Call</th><th>What it does</th></tr></thead>
+        <tbody>
+          <tr><td><code>setupRenderer(r)</code></td><td>ACES filmic, exposure 0.9, sRGB output, pixel ratio capped at 2, PCF shadows. Options for AgX or Neutral.</td></tr>
+          <tr><td><code>createComposer(r, scene, cam)</code></td><td>MSAA half-float target → RenderPass → UnrealBloomPass (threshold 1.0) → OutputPass, with a correct <code>setSize</code>.</td></tr>
+          <tr><td><code>createLightRig(scene, preset)</code></td><td>Key + hemisphere fill for new scenes: daylight, overcast, golden, studio, night.</td></tr>
+          <tr><td><code>tameLights(scene)</code></td><td>Retrofit: caps ambient and env, scales stacked lights to budget keeping their ratios, decay → 2 with compensation, shadow bias, roughness floor on metals, emissive cap, sRGB colour maps. Returns a list of changes.</td></tr>
+          <tr><td><code>calibrateExposure(r, render)</code></td><td>One-shot auto exposure: reads back frames and adjusts only if clipping exceeds 1.5 % or the image is too dark or bright.</td></tr>
+          <tr><td><code>createShadowFollower(sun, offset)</code></td><td>Lets the sun follow a vehicle or player with texel-snapped shadows. No swimming.</td></tr>
+          <tr><td><code>createLightFlicker(light)</code></td><td>Smooth-noise flicker at ±8 % for lamps, fire and neon.</td></tr>
+          <tr><td><code>auditLighting(scene, r, composer)</code></td><td>Console table of anything still likely to blow out or flicker.</td></tr>
+          <tr><td><code>lint-lighting.mjs</code></td><td>Static check of source files; exits 1 on high-severity issues so an agent can gate on it.</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="col" id="install">
+    <p class="eyebrow">Install</p>
+    <h2>Add it to Claude</h2>
+    <div class="steps">
+      <div>
+        <h3>Claude app (web, desktop)</h3>
+        <p>Download <code>threejs-hdr-lighting.zip</code> from the repo and upload it as a skill in Claude's Skills settings. Claude then uses it automatically whenever it builds a three.js scene with lights.</p>
+        <p><a href="https://github.com/thickiran/threejs-hdr-lighting" target="_blank" rel="noopener">github.com/thickiran/threejs-hdr-lighting</a></p>
+      </div>
+      <div>
+        <h3>Claude Code</h3>
+        <div class="copyrow">
+          <pre id="cc">git clone https://github.com/thickiran/threejs-hdr-lighting /tmp/hdr
+cp -r /tmp/hdr/threejs-hdr-lighting ~/.claude/skills/</pre>
+          <button data-copy="cc">Copy</button>
+        </div>
+        <p>Use <code>.claude/skills/</code> inside a project instead to share it with a team through the repo.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="col">
+    <p class="eyebrow">Use</p>
+    <h2>Prompts that trigger it</h2>
+    <p>For new work you don't need to mention the skill. Ask for the scene and the setup comes with it:</p>
+    <pre>Build a three.js night street with lamps, a neon sign and a car I can drive.</pre>
+    <p>To fix something that already exists, name the symptom:</p>
+    <pre>This three.js artifact is blown out and the shadows flicker. Fix the lighting.</pre>
+    <p>Retrofitting by hand takes four calls after your scene is built:</p>
+    <div class="copyrow">
+      <pre id="retro">import { setupRenderer, tameLights, createComposer, calibrateExposure }
+  from './hdr-lighting.js';
+
+setupRenderer(renderer);
+tameLights(scene);
+const post = createComposer(renderer, scene, camera);
+renderer.setAnimationLoop(() => post.render());
+await calibrateExposure(renderer, () => post.render());</pre>
+      <button data-copy="retro">Copy</button>
+    </div>
+    <p class="callout">Verify before calling it done: <code>auditLighting()</code> shows no high rows, clipped pixels stay under 2 %, and orbiting the camera for a few seconds shows still shadow edges and no sparkle on metal.</p>
+  </section>
+
+  <footer class="col">Built by Tolgay Hickiran with Claude. three.js r186.1. The demo above runs the published <code>hdr-lighting.js</code> unmodified.</footer>
+</div>
+
+<script>
+// ---- Tone-curve chart (three.js ACESFilmicToneMapping fit, grey input) ----
+(function () {
+  const svg = document.getElementById('curve-svg');
+  const tip = document.getElementById('curve-tip');
+  const box = document.getElementById('curve');
+  const W = 720, H = 300, L = 46, R = 14, T = 12, B = 40;
+  const xmax = 8;
+  const x = (v) => L + (v / xmax) * (W - L - R);
+  const y = (v) => T + (1 - v) * (H - T - B);
+  const fit = (v) => (v * (v + 0.0245786) - 0.000090537) / (v * (0.983729 * v + 0.4329510) + 0.238081);
+  const srgb = (c) => { c = Math.min(1, Math.max(0, c)); return c <= 0.0031308 ? 12.92 * c : 1.055 * Math.pow(c, 1 / 2.4) - 0.055; };
+  const aces = (v) => srgb(fit(v * 0.9 / 0.6));
+  const none = (v) => srgb(v);
+  const NS = 'http://www.w3.org/2000/svg';
+  const el = (n, a) => { const e = document.createElementNS(NS, n); for (const k in a) e.setAttribute(k, a[k]); return e; };
+  // grid + axes
+  for (let gy = 0; gy <= 1.0001; gy += 0.25) {
+    svg.append(el('line', { x1: L, x2: W - R, y1: y(gy), y2: y(gy), stroke: 'var(--rule)', 'stroke-width': 1 }));
+    const t = el('text', { x: L - 8, y: y(gy) + 4, 'text-anchor': 'end', fill: 'var(--ink-3)', 'font-size': 11, 'font-family': 'var(--f-mono)' });
+    t.textContent = gy.toFixed(2); svg.append(t);
+  }
+  for (let gx = 0; gx <= xmax; gx += 1) {
+    const t = el('text', { x: x(gx), y: H - B + 18, 'text-anchor': 'middle', fill: 'var(--ink-3)', 'font-size': 11, 'font-family': 'var(--f-mono)' });
+    t.textContent = gx; svg.append(t);
+  }
+  const xl = el('text', { x: (L + W - R) / 2, y: H - 4, 'text-anchor': 'middle', fill: 'var(--ink-3)', 'font-size': 11, 'font-family': 'var(--f-body)' });
+  xl.textContent = 'scene radiance, linear (1.0 = display white without tone mapping)'; svg.append(xl);
+  // clip line
+  svg.append(el('line', { x1: x(1), x2: x(1), y1: T, y2: H - B, stroke: 'var(--clip)', 'stroke-width': 1, 'stroke-dasharray': '3 3' }));
+  const cl = el('text', { x: x(1) + 6, y: T + 12, fill: 'var(--ink-2)', 'font-size': 11, 'font-family': 'var(--f-body)' }); cl.textContent = 'clip point'; svg.append(cl);
+  const path = (f) => { let d = ''; for (let i = 0; i <= 320; i++) { const v = (i / 320) * xmax; d += (i ? 'L' : 'M') + x(v).toFixed(1) + ' ' + y(f(v)).toFixed(1); } return d; };
+  svg.append(el('path', { d: path(none), fill: 'none', stroke: 'var(--s-none)', 'stroke-width': 2, 'stroke-linejoin': 'round' }));
+  svg.append(el('path', { d: path(aces), fill: 'none', stroke: 'var(--s-aces)', 'stroke-width': 2, 'stroke-linejoin': 'round' }));
+  // marked points
+  const marks = [
+    { v: 0.85, f: aces, label: 'Wall with skill ≈ 0.85', dy: 30, anchor: 'start' },
+    { v: 4.5, f: none, label: 'Wall, typical lights ≈ 4.5 → flat white', dy: 34, anchor: 'middle' },
+  ];
+  for (const m of marks) {
+    svg.append(el('circle', { cx: x(m.v), cy: y(m.f(m.v)), r: 4.5, fill: 'var(--surface)', stroke: 'var(--ink)', 'stroke-width': 2 }));
+    const t = el('text', { x: x(m.v) + (m.anchor === 'start' ? 10 : 0), y: y(m.f(m.v)) + m.dy, 'text-anchor': m.anchor, fill: 'var(--ink)', 'font-size': 12, 'font-family': 'var(--f-body)', 'font-weight': 600 });
+    t.textContent = m.label; svg.append(t);
+  }
+  // hover
+  const cross = el('line', { y1: T, y2: H - B, stroke: 'var(--ink-3)', 'stroke-width': 1, visibility: 'hidden' });
+  const d1 = el('circle', { r: 4, fill: 'var(--s-none)', stroke: 'var(--surface)', 'stroke-width': 2, visibility: 'hidden' });
+  const d2 = el('circle', { r: 4, fill: 'var(--s-aces)', stroke: 'var(--surface)', 'stroke-width': 2, visibility: 'hidden' });
+  svg.append(cross, d1, d2);
+  const hit = el('rect', { x: L, y: T, width: W - L - R, height: H - T - B, fill: 'transparent' });
+  svg.append(hit);
+  function move(ev) {
+    const r = svg.getBoundingClientRect();
+    const px = ((ev.clientX - r.left) / r.width) * W;
+    const v = Math.min(xmax, Math.max(0, ((px - L) / (W - L - R)) * xmax));
+    const a = aces(v), n = none(v);
+    cross.setAttribute('x1', x(v)); cross.setAttribute('x2', x(v));
+    d1.setAttribute('cx', x(v)); d1.setAttribute('cy', y(n));
+    d2.setAttribute('cx', x(v)); d2.setAttribute('cy', y(a));
+    [cross, d1, d2].forEach((e) => e.setAttribute('visibility', 'visible'));
+    tip.innerHTML = `radiance ${v.toFixed(2)}<br>none&nbsp; ${n.toFixed(3)}${n >= 0.999 ? ' (clipped)' : ''}<br>ACES&nbsp; ${a.toFixed(3)}`;
+    tip.hidden = false;
+    const br = box.getBoundingClientRect();
+    let tx = ev.clientX - br.left + 14;
+    if (tx > br.width - 170) tx = ev.clientX - br.left - 170;
+    tip.style.left = tx + 'px';
+    tip.style.top = (ev.clientY - br.top - 20) + 'px';
+  }
+  hit.addEventListener('pointermove', move);
+  hit.addEventListener('pointerleave', () => { tip.hidden = true; [cross, d1, d2].forEach((e) => e.setAttribute('visibility', 'hidden')); });
+})();
+
+// ---- Copy buttons ----
+document.querySelectorAll('[data-copy]').forEach((b) => b.addEventListener('click', () => {
+  const pre = document.getElementById(b.dataset.copy);
+  const done = () => { b.textContent = 'Copied'; setTimeout(() => (b.textContent = 'Copy'), 1400); };
+  navigator.clipboard.writeText(pre.textContent).then(done, () => {
+    const rg = document.createRange(); rg.selectNodeContents(pre);
+    const s = getSelection(); s.removeAllRanges(); s.addRange(rg); b.textContent = 'Selected — press Ctrl/⌘ C';
+  });
+}));
+</script>
+
+<script type="module">
+import { mountDemo } from './demo.js';
+const $ = (id) => document.getElementById(id);
+const TM = { 0: 'None', 4: 'ACES filmic', 6: 'AgX', 7: 'Neutral' };
+const hist = $('hist');
+function drawHist(h) {
+  const bins = h.length, w = 480 / bins, max = Math.max(...h.slice(0, bins - 1), 0.02);
+  let s = '';
+  h.forEach((v, i) => {
+    const bh = Math.min(1, v / max) * 50;
+    const last = i >= bins - 2;
+    s += `<rect x="${(i * w + 0.5).toFixed(1)}" y="${(54 - Math.max(bh, v > 0 ? 1 : 0)).toFixed(1)}" width="${(w - 1).toFixed(1)}" height="${Math.max(bh, v > 0 ? 1 : 0).toFixed(1)}" rx="1" fill="${last ? '#ff7b82' : '#d9d3c7'}"/>`;
+  });
+  hist.innerHTML = s;
+}
+let demo;
+try {
+  demo = mountDemo({
+    canvas: $('view'),
+    onStats(s) {
+      $('r-tm').textContent = TM[s.toneMapping] ?? s.toneMapping;
+      $('r-tm').className = s.toneMapping === 0 ? 'bad' : 'ok';
+      $('r-exp').textContent = s.exposure.toFixed(2);
+      $('r-clip').textContent = (s.clipped * 100).toFixed(1) + ' %';
+      $('r-clip').className = s.clipped > 0.02 ? 'bad' : 'ok';
+      $('r-mean').textContent = s.mean.toFixed(2);
+      drawHist(s.hist);
+    },
+    onReport(mode, report) {
+      $('changes').hidden = mode !== 'skill' || !report.length;
+      $('change-list').innerHTML = report.map((r) => `<li>${r.replace(/</g, '&lt;')}</li>`).join('');
+    },
+  });
+} catch (e) {
+  $('view').replaceWith(Object.assign(document.createElement('p'), { textContent: 'WebGL is not available in this browser, so the live demo cannot run. Everything below still applies.', style: 'padding:24px' }));
+}
+for (const m of ['typical', 'skill']) {
+  $('m-' + m).addEventListener('click', () => {
+    if (!demo) return;
+    demo.setMode(m);
+    $('m-typical').setAttribute('aria-pressed', m === 'typical');
+    $('m-skill').setAttribute('aria-pressed', m === 'skill');
+  });
+}
+// pause rendering when the viewport is off screen
+if (demo) new IntersectionObserver(([e]) => demo.pause(!e.isIntersecting)).observe($('view'));
+</script>
+
+</html>
